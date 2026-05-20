@@ -216,8 +216,10 @@ MESSAGE: ton analyse fun
         lines = result.split("\n")
 
         if "XP:" not in result or "PV:" not in result:
-            return
-        for line in lines:
+            await ctx.respond("❌ Réponse IA invalide")
+
+        else:
+            for line in lines:
 
             if line.startswith("XP:"):
 
