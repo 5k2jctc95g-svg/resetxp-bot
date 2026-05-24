@@ -1,3 +1,4 @@
 py-cord
 openai
 python-dotenv
+PyNaCl
