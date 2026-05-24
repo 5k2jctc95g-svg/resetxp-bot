@@ -10,6 +10,7 @@ import time
 import random
 import datetime
 import requests
+import base64
 
 # Charger variables .env
 load_dotenv()
@@ -115,7 +116,9 @@ def create_user(user_id):
             "pv": 100,
             "level": 1,
             "challenge": None,
-            "weights": []
+            "weights": [],
+            "last_gym": None,
+            "gym_sessions": 0
         }
 
         save_data(data)
@@ -132,6 +135,18 @@ def create_user(user_id):
         if "weights" not in data[str(user_id)]:
 
             data[str(user_id)]["weights"] = []
+            updated = True
+
+        if "last_gym" not in data[str(user_id)]:
+
+            data[str(user_id)]["last_gym"] = None
+
+            updated = True
+
+        if "gym_sessions" not in data[str(user_id)]:
+
+            data[str(user_id)]["gym_sessions"] = 0
+
             updated = True
 
         if updated:
@@ -823,5 +838,124 @@ async def renderstatus(ctx):
     )
 
     await ctx.respond(embed=embed)
+
+@bot.slash_command(
+    name="gymproof",
+    description="Valider une séance de salle"
+)
+async def gymproof(
+    ctx,
+    image: discord.Attachment
+):
+
+    data, user = get_user(ctx.author.id)
+
+    today = str(datetime.date.today())
+
+    # Anti spam journalier
+    if user["last_gym"] == today:
+
+        await ctx.respond(
+            "⚠️ Tu as déjà validé une séance aujourd'hui."
+        )
+
+        return
+
+    await ctx.defer()
+
+    image_bytes = await image.read()
+
+    response = client.chat.completions.create(
+
+        model="gpt-4o-mini",
+
+        messages=[
+
+            {
+                "role": "system",
+                "content": (
+                    "Tu analyses des preuves de salle de sport.\n"
+                    "Réponds STRICTEMENT sous ce format :\n\n"
+                    "SCORE: nombre entre 0 et 100\n"
+                    "MESSAGE: courte explication\n\n"
+                    "Une vraie salle : machines, haltères, tapis, vestiaire, logo salle, environnement fitness.\n"
+                    "Un selfie seul ou une photo floue = score faible."
+                )
+            },
+
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Analyse cette preuve de salle."
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
+                        }
+                    }
+                ]
+            }
+        ]
+    )
+
+    result = response.choices[0].message.content
+
+    score = 0
+    message = "Analyse impossible."
+
+    for line in result.splitlines():
+
+        if line.startswith("SCORE:"):
+
+            try:
+
+                score = int(
+                    line.replace("SCORE:", "").strip()
+                )
+
+            except:
+
+                score = 0
+
+        if line.startswith("MESSAGE:"):
+
+            message = line.replace(
+                "MESSAGE:",
+                ""
+            ).strip()
+
+    if score >= 50:
+
+        xp_gain = 25
+
+        user["xp"] += xp_gain
+
+        user["last_gym"] = today
+
+        user["gym_sessions"] += 1
+
+        save_data(data)
+
+        embed = discord.Embed(
+            title="🏋️ Séance validée !",
+            description=(
+                f"🔥 +{xp_gain} XP\n\n"
+                f"{message}"
+            ),
+            color=discord.Color.green()
+        )
+
+    else:
+
+        embed = discord.Embed(
+            title="❌ Séance refusée",
+            description=message,
+            color=discord.Color.red()
+        )
+
+    await ctx.followup.send(embed=embed)
 
 bot.run(DISCORD_TOKEN)
