@@ -9,12 +9,14 @@ import json
 import time
 import random
 import datetime
+import requests
 
 # Charger variables .env
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+RENDER_API_KEY = os.getenv("RENDER_API_KEY")
 
 # Client OpenAI
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -759,5 +761,65 @@ async def weekly_weight_reminder():
             )
 
             await channel.send(embed=embed)
+
+@bot.slash_command(
+    name="renderstatus",
+    description="Voir le statut du serveur Render"
+)
+async def renderstatus(ctx):
+
+    headers = {
+        "Authorization": f"Bearer {RENDER_API_KEY}"
+    }
+
+    response = requests.get(
+        "https://api.render.com/v1/services",
+        headers=headers
+    )
+
+    if response.status_code != 200:
+
+        await ctx.respond("❌ Impossible de contacter Render.")
+        return
+
+    services = response.json()
+
+    if not services:
+
+        await ctx.respond("❌ Aucun service trouvé.")
+        return
+
+    service = services[0]
+
+    name = service.get("service", {}).get("name", "Inconnu")
+    status = service.get("service", {}).get("suspended", False)
+
+    status_text = "🟢 Online"
+
+    if status:
+        status_text = "🔴 Offline"
+
+    embed = discord.Embed(
+        title="📡 Render Status",
+        color=discord.Color.green()
+    )
+
+    embed.add_field(
+        name="Service",
+        value=name,
+        inline=False
+    )
+
+    embed.add_field(
+        name="Statut",
+        value=status_text,
+        inline=False
+    )
+
+    embed.set_footer(
+        text="ResetXP Monitoring"
+    )
+
+    await ctx.respond(embed=embed)
 
 bot.run(DISCORD_TOKEN)
