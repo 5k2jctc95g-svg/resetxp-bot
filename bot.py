@@ -790,13 +790,15 @@ async def renderstatus(ctx):
         return
 
     service = services[0]
+    print(service)
 
     name = service.get("service", {}).get("name", "Inconnu")
-    status = service.get("service", {}).get("suspended", False)
+
+    suspended = service.get("suspended")
 
     status_text = "🟢 Online"
 
-    if status:
+    if suspended == True:
         status_text = "🔴 Offline"
 
     embed = discord.Embed(
