@@ -29,7 +29,48 @@ intents.message_content = True
 # Création bot
 bot = discord.Bot(intents=intents)
 cooldowns = {}
+
+daily_quest = {
+    "type": None,
+    "description": None,
+    "reward": 50
+}
+
+weekly_server_quest = {
+    "goal": 10,
+    "progress": 0,
+    "participants": [],
+    "completed": False
+}
+
+quests = [
+
+    {
+        "type": "healthy_meal",
+        "description": "🥗 Montre un repas healthy"
+    },
+
+    {
+        "type": "gym",
+        "description": "🏋️ Montre une salle de sport"
+    },
+
+    {
+        "type": "water",
+        "description": "💧 Montre une bouteille d’eau"
+    },
+
+    {
+        "type": "walking",
+        "description": "🚶 Montre une marche extérieure"
+    }
+]
+
 CHANNEL_ID = 1508142974716870737
+
+WORLD_QUEST_CHANNEL_ID = 1508391376545513643
+
+DAILY_QUEST_CHANNEL_ID = 1508391376545513643
 
 challenges = [
     "20 squats",
@@ -118,7 +159,8 @@ def create_user(user_id):
             "challenge": None,
             "weights": [],
             "last_gym": None,
-            "gym_sessions": 0
+            "gym_sessions": 0,
+            "last_daily_quest": None
         }
 
         save_data(data)
@@ -146,6 +188,12 @@ def create_user(user_id):
         if "gym_sessions" not in data[str(user_id)]:
 
             data[str(user_id)]["gym_sessions"] = 0
+
+            updated = True
+
+        if "last_daily_quest" not in data[str(user_id)]:
+
+            data[str(user_id)]["last_daily_quest"] = None
 
             updated = True
 
@@ -456,6 +504,10 @@ async def on_ready():
     print(f"✅ {bot.user} connecté")
 
     weekly_weight_reminder.start()
+
+    daily_quest_loop.start()
+
+    weekly_server_quest_loop.start()
 
 @bot.slash_command()
 async def leaderboard(ctx):
@@ -937,6 +989,50 @@ async def gymproof(
 
         user["gym_sessions"] += 1
 
+        global weekly_server_quest
+
+        if weekly_server_quest["completed"] == False:
+
+            weekly_server_quest["progress"] += 1
+
+            if ctx.author.id not in weekly_server_quest["participants"]:
+
+                weekly_server_quest["participants"].append(
+                    ctx.author.id
+                )
+
+                channel = bot.get_channel(
+            WORLD_QUEST_CHANNEL_ID
+        )
+
+        if channel:
+
+            await channel.send(
+                f"📈 Progression quête mondiale : "
+                f"{weekly_server_quest['progress']} / "
+                f"{weekly_server_quest['goal']}"
+            )
+
+        if weekly_server_quest["progress"] >= weekly_server_quest["goal"]:
+
+            weekly_server_quest["completed"] = True
+
+            for participant_id in weekly_server_quest["participants"]:
+
+                participant_id = str(participant_id)
+
+                if participant_id in data:
+
+                    data[participant_id]["xp"] += 100
+
+            save_data(data)
+
+            if channel:
+
+                await channel.send(
+                    "🎉 QUÊTE MONDIALE TERMINÉE !\n\n"
+                    "🔥 Tous les participants gagnent +100 XP !"
+                )
         save_data(data)
 
         embed = discord.Embed(
@@ -957,5 +1053,194 @@ async def gymproof(
         )
 
     await ctx.followup.send(embed=embed)
+
+@tasks.loop(minutes=1)
+async def daily_quest_loop():
+
+    now = datetime.datetime.now()
+
+    if now.hour == 11 and now.minute == 0:
+
+        global daily_quest
+
+        quest = random.choice(quests)
+
+        daily_quest["type"] = quest["type"]
+
+        daily_quest["description"] = quest["description"]
+
+        daily_quest["reward"] = 50
+
+        print(daily_quest)
+
+        channel = bot.get_channel(DAILY_QUEST_CHANNEL_ID)
+
+        if channel:
+
+            embed = discord.Embed(
+                title="🎯 QUÊTE QUOTIDIENNE",
+                description=(
+                    f"{daily_quest['description']}\n\n"
+                    f"🔥 Récompense : +{daily_quest['reward']} XP\n\n"
+                    "Utilisez : `/dailyquest`"
+                ),
+                color=discord.Color.gold()
+            )
+
+            await channel.send(embed=embed)
+
+@bot.slash_command(
+    name="dailyquest",
+    description="Valider la quête quotidienne"
+)
+async def dailyquest(
+    ctx,
+    image: discord.Attachment
+):
+
+    global daily_quest
+
+    data, user = get_user(ctx.author.id)
+
+    today = str(datetime.date.today())
+
+    if user["last_daily_quest"] == today:
+
+        await ctx.respond(
+            "⚠️ Tu as déjà validé la quête aujourd'hui."
+        )
+
+        return
+
+    await ctx.defer()
+
+    image_bytes = await image.read()
+
+    response = client.chat.completions.create(
+
+        model="gpt-4o-mini",
+
+        messages=[
+
+            {
+                "role": "system",
+                "content": (
+                    f"La quête du jour est : {daily_quest['type']}.\n"
+                    "Analyse l'image.\n\n"
+                    "Réponds STRICTEMENT sous ce format :\n\n"
+                    "SCORE: nombre entre 0 et 100\n"
+                    "MESSAGE: courte explication"
+                )
+            },
+
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Analyse cette preuve."
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
+                        }
+                    }
+                ]
+            }
+        ]
+    )
+
+    result = response.choices[0].message.content
+
+    score = 0
+    message = "Analyse impossible."
+
+    for line in result.splitlines():
+
+        if line.startswith("SCORE:"):
+
+            try:
+
+                score = int(
+                    line.replace("SCORE:", "").strip()
+                )
+
+            except:
+
+                score = 0
+
+        if line.startswith("MESSAGE:"):
+
+            message = line.replace(
+                "MESSAGE:",
+                ""
+            ).strip()
+
+    if score >= 50:
+
+        xp_gain = daily_quest["reward"]
+
+        user["xp"] += xp_gain
+
+        user["last_daily_quest"] = today
+
+        save_data(data)
+
+        embed = discord.Embed(
+            title="🎯 Quête réussie !",
+            description=(
+                f"🔥 +{xp_gain} XP\n\n"
+                f"{message}"
+            ),
+            color=discord.Color.green()
+        )
+
+    else:
+
+        embed = discord.Embed(
+            title="❌ Quête refusée",
+            description=message,
+            color=discord.Color.red()
+        )
+
+    await ctx.followup.send(embed=embed)
+
+@tasks.loop(minutes=1)
+async def weekly_server_quest_loop():
+
+    now = datetime.datetime.now()
+
+    # Lundi 11h
+    if now.weekday() == 0 and now.hour == 11 and now.minute == 0:
+
+        global weekly_server_quest
+
+        weekly_server_quest = {
+            "goal": 10,
+            "progress": 0,
+            "participants": [],
+            "completed": False
+        }
+
+        channel = bot.get_channel(
+            WORLD_QUEST_CHANNEL_ID
+        )
+
+        if channel:
+
+            embed = discord.Embed(
+                title="🌍 QUÊTE MONDIALE",
+                description=(
+                    "🏋️ Validez 10 séances de sport cette semaine.\n\n"
+                    f"📈 Progression : "
+                    f"{weekly_server_quest['progress']} / "
+                    f"{weekly_server_quest['goal']}\n\n"
+                    "🔥 Récompense : +100 XP"
+                ),
+                color=discord.Color.orange()
+            )
+
+            await channel.send(embed=embed)
 
 bot.run(DISCORD_TOKEN)
